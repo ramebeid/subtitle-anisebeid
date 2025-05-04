@@ -1,21 +1,22 @@
+from dotenv import load_dotenv
+load_dotenv()
 import os
 os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.expanduser("~/bin/ffmpeg")
 import openai
 import streamlit as st
 import tempfile
 import datetime
-
-
-
-from moviepy.editor import AudioFileClip
+import re
+from moviepy.editor import VideoFileClip, AudioFileClip
+from concurrent.futures import ThreadPoolExecutor
 
 # Load OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Or set it directly as: openai.api_key = "sk-..."
 
 # Language options
-LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English"]
+LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English", "Chinese", "Hindi"]
 
-# Function to transcribe audio using Whisper
+# Function to transcribe a chunk
 def transcribe_audio(file_path):
     with open(file_path, "rb") as audio_file:
         transcript = openai.Audio.transcribe(
@@ -38,57 +39,114 @@ def translate_line(text, language):
     )
     return response.choices[0].message.content.strip()
 
-# Function to format SRT timestamps
+# Format SRT timestamps
 def format_timestamp(seconds):
     return str(datetime.timedelta(seconds=int(seconds))) + ",000"
 
+# Split video into audio chunks for transcription (avoid fps errors)
+def split_video(file_path, chunk_duration=600):
+    video = VideoFileClip(file_path)
+    duration = int(video.duration)
+    chunks = []
+    for start in range(0, duration, chunk_duration):
+        end = min(start + chunk_duration, duration)
+        subclip = video.subclip(start, end)
+
+        # Export audio only
+        audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        subclip.audio.write_audiofile(audio_temp.name, logger=None)
+        chunks.append((audio_temp.name, start))
+    return chunks
+
+# Parse SRT file content
+def parse_srt(srt_content):
+    blocks = srt_content.strip().split('\n\n')
+    parsed_entries = []
+    for block in blocks:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3:
+            try:
+                num = int(lines[0])
+                times = lines[1]
+                start, end = times.split(' --> ')
+                text = ' '.join(lines[2:])
+                parsed_entries.append((num, start, end, text))
+            except Exception:
+                continue
+    return parsed_entries
+
+# Translate SRT segments
+def translate_srt(srt_content, target_language):
+    entries = parse_srt(srt_content)
+    translated = []
+    for num, start, end, text in entries:
+        translated_text = translate_line(text, target_language)
+        translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
+    return "\n".join(translated)
+
 # Streamlit app UI
 st.set_page_config(page_title="Subtitle Translator App")
-st.title("🎬 Subtitle Translator")
-st.write("Upload a video file, choose a language, and get translated subtitles.")
+st.title("\U0001F3AC Subtitle Translator")
+st.write("Upload a video *or* subtitle file, choose a language, and get translated subtitles.")
 
-video_file = st.file_uploader("Upload a video file", type=["mp4", "mov"])
+input_mode = st.radio("Choose input type:", ["Video", "SRT file"])
+
 target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
 
-if st.button("Generate Subtitles"):
-    if video_file and target_language:
-        with st.spinner("Processing video and generating subtitles..."):
-            # Save uploaded file to temp
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-                temp_video.write(video_file.read())
-                temp_video_path = temp_video.name
+if input_mode == "Video":
+    video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
+    if st.button("Generate Subtitles from Video"):
+        if video_file and target_language:
+            with st.spinner("Processing video and generating subtitles..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                    temp_video.write(video_file.read())
+                    temp_video_path = temp_video.name
 
-            # Transcribe
-            transcript = transcribe_audio(temp_video_path)
-            segments = transcript["segments"]
+                # Split and transcribe in parallel
+                chunks = split_video(temp_video_path)
 
-            # Translate and build output strings
-            txt_lines = []
-            srt_lines = []
+                def process_chunk(chunk_path, offset):
+                    result = transcribe_audio(chunk_path)
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
-            for i, segment in enumerate(segments, 1):
-                start = format_timestamp(segment["start"])
-                end = format_timestamp(segment["end"])
-                original = segment["text"].strip()
-                translation = translate_line(original, target_language)
+                with ThreadPoolExecutor() as executor:
+                    results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
 
-                # TXT
-                txt_lines.append(f"{start} --> {end}\n{original}\n{translation}\n")
+                # Flatten and translate segments
+                segments = [seg for group in results for seg in group]
+                txt_lines = []
+                srt_lines = []
 
-                # SRT
-                srt_lines.append(f"{i}\n{start} --> {end}\n{translation}\n")
+                for i, (start_sec, end_sec, text) in enumerate(segments, 1):
+                    start = format_timestamp(start_sec)
+                    end = format_timestamp(end_sec)
+                    translation = translate_line(text.strip(), target_language)
 
-            # Save files
-            txt_output = "\n".join(txt_lines)
-            srt_output = "\n".join(srt_lines)
+                    txt_lines.append(f"{start} --> {end}\n{text.strip()}\n{translation}\n")
+                    srt_lines.append(f"{i}\n{start} --> {end}\n{translation}\n")
 
-            with open("subtitles.txt", "w", encoding="utf-8") as f:
-                f.write(txt_output)
-            with open("subtitles.srt", "w", encoding="utf-8") as f:
-                f.write(srt_output)
+                txt_output = "\n".join(txt_lines)
+                srt_output = "\n".join(srt_lines)
 
-        st.success("✅ Subtitles generated!")
-        st.download_button("Download .txt", txt_output, file_name="subtitles.txt")
-        st.download_button("Download .srt", srt_output, file_name="subtitles.srt")
-    else:
-        st.warning("Please upload a video and select a language.")
+                with open("subtitles.txt", "w", encoding="utf-8") as f:
+                    f.write(txt_output)
+                with open("subtitles.srt", "w", encoding="utf-8") as f:
+                    f.write(srt_output)
+
+            st.success("\u2705 Subtitles generated!")
+            st.download_button("Download .txt", txt_output, file_name="subtitles.txt")
+            st.download_button("Download .srt", srt_output, file_name="subtitles.srt")
+        else:
+            st.warning("Please upload a video and select a language.")
+
+elif input_mode == "SRT file":
+    srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
+    if st.button("Translate SRT File"):
+        if srt_file and target_language:
+            srt_content = srt_file.read().decode("utf-8")
+            with st.spinner("Translating SRT file..."):
+                translated_srt = translate_srt(srt_content, target_language)
+                st.success("\u2705 Translation complete!")
+                st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
+        else:
+            st.warning("Please upload an SRT file and select a language.")

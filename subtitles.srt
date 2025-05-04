@@ -1,3 +1,3 @@
 1
-0:00:00,000 --> 0:00:07,000
-مرحبًا، هذا فيديو اختبار للقدرات الجديدة. آمل أن نستمتع جميعًا به.
+0:00:00,000 --> 0:00:09,000
+Hello, this is a test video for the new capability. I hope we all can enjoy it.
