@@ -11,7 +11,7 @@ from moviepy.editor import VideoFileClip, AudioFileClip
 from concurrent.futures import ThreadPoolExecutor
 
 # Load OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")  # Or set it directly as: openai.api_key = "sk-..."
+openai.api_key = st.secrets["OPENAI_API_KEY"]  # Or set it directly as: openai.api_key = "sk-..."
 
 # Language options
 LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English", "Chinese", "Hindi"]
