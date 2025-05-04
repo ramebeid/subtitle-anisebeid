@@ -1,4 +1,4 @@
 streamlit
 openai
-moviepy
+git+https://github.com/Zulko/moviepy.git
 python-dotenv
