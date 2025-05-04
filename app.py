@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
-os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.expanduser("~/bin/ffmpeg")
+#os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.expanduser("~/bin/ffmpeg")
 import openai
 import streamlit as st
 import tempfile
