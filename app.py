@@ -49,16 +49,17 @@ def split_video(file_path, chunk_duration=600):
     chunks = []
     for start in range(0, duration, chunk_duration):
         end = min(start + chunk_duration, duration)
-        subclip = video.subclip(start, end)
-
-        # Padding last subclip if needed
-        if end == duration:
-            subclip = subclip.set_duration(subclip.duration + 2)
-
-        # Export audio only
-        audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        subclip.audio.write_audiofile(audio_temp.name, logger=None)
-        chunks.append((audio_temp.name, start))
+        if end - start <= 0:
+            continue
+        try:
+            subclip = video.subclip(start, end)
+            if end == duration:
+                subclip = subclip.set_duration(subclip.duration + 2)
+            audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            subclip.audio.write_audiofile(audio_temp.name, logger=None)
+            chunks.append((audio_temp.name, start))
+        except Exception as e:
+            st.error(f"Error processing chunk {start}-{end}: {e}")
     return chunks
 
 # Parse SRT file content
@@ -105,7 +106,6 @@ if input_mode == "Video":
                     temp_video.write(video_file.read())
                     temp_video_path = temp_video.name
 
-                # Split and transcribe in parallel
                 chunks = split_video(temp_video_path)
 
                 def process_chunk(chunk_path, offset):
@@ -115,7 +115,6 @@ if input_mode == "Video":
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
 
-                # Flatten and translate segments
                 segments = [seg for group in results for seg in group]
                 txt_lines = []
                 srt_lines = []
@@ -124,7 +123,6 @@ if input_mode == "Video":
                     start = format_timestamp(start_sec)
                     end = format_timestamp(end_sec)
                     translation = translate_line(text.strip(), target_language)
-
                     txt_lines.append(f"{start} --> {end}\n{text.strip()}\n{translation}\n")
                     srt_lines.append(f"{i}\n{start} --> {end}\n{translation}\n")
 
