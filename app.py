@@ -53,8 +53,6 @@ def split_video(file_path, chunk_duration=600):
             continue
         try:
             subclip = video.subclip(start, end)
-            if end == duration:
-                subclip = subclip.set_duration(subclip.duration + 2)
             audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             subclip.audio.write_audiofile(audio_temp.name, logger=None)
             chunks.append((audio_temp.name, start))
@@ -110,7 +108,7 @@ if input_mode == "Video":
 
                 def process_chunk(chunk_path, offset):
                     result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result.get("segments", [])]
 
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
