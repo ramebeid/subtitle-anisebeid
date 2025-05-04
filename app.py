@@ -51,6 +51,10 @@ def split_video(file_path, chunk_duration=600):
         end = min(start + chunk_duration, duration)
         subclip = video.subclip(start, end)
 
+        # Padding last subclip if needed
+        if end == duration:
+            subclip = subclip.set_duration(subclip.duration + 2)
+
         # Export audio only
         audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
         subclip.audio.write_audiofile(audio_temp.name, logger=None)
