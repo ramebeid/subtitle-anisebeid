@@ -23,7 +23,7 @@ def transcribe_audio(file_path):
             file=audio_file,
             response_format="verbose_json"
         )
-    return transcript
+    return transcript.model_dump()  # Convert Pydantic object to dictionary
 
 # Function to translate text using GPT-3.5
 def translate_line(text, language):
