@@ -1,17 +1,16 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
-#os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.expanduser("~/bin/ffmpeg")
-import openai
 import streamlit as st
 import tempfile
 import datetime
 import re
 from moviepy.editor import VideoFileClip, AudioFileClip
 from concurrent.futures import ThreadPoolExecutor
+from openai import OpenAI
 
 # Load OpenAI API key
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # Or set it directly as: openai.api_key = "sk-..."
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Language options
 LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English", "Chinese", "Hindi"]
@@ -19,7 +18,7 @@ LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English", "Ch
 # Function to transcribe a chunk
 def transcribe_audio(file_path):
     with open(file_path, "rb") as audio_file:
-        transcript = openai.Audio.transcribe(
+        transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             response_format="verbose_json"
@@ -32,7 +31,7 @@ def translate_line(text, language):
         {"role": "system", "content": f"Translate this sentence into {language}. Return only the translation."},
         {"role": "user", "content": text}
     ]
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=messages,
         temperature=0.3
