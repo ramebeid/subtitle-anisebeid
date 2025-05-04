@@ -1,5 +1,6 @@
 streamlit
 openai
+setuptools
 imageio-ffmpeg==0.4.7
 git+https://github.com/Zulko/moviepy.git
 python-dotenv
