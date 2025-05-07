@@ -51,6 +51,7 @@ def format_timestamp(seconds):
     return str(datetime.timedelta(seconds=int(seconds))) + ",000"
 
 # Split video into audio chunks for transcription
+
 def split_video(file_path, chunk_duration=600):
     video = VideoFileClip(file_path)
     duration = int(video.duration)
@@ -60,15 +61,17 @@ def split_video(file_path, chunk_duration=600):
         if end - start <= 0:
             continue
         try:
-            subclip = video.subclip(start, end - 0.1)
+            subclip = video.subclip(start, end)
             audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             subclip.audio.write_audiofile(audio_temp.name, logger=None)
             chunks.append((audio_temp.name, start))
         except Exception as e:
             st.error(f"Error processing chunk {start}-{end}: {e}")
+    video.close()
     return chunks
 
 # Parse SRT file content
+
 def parse_srt(srt_content):
     srt_content = srt_content.replace('\ufeff', '')  # remove BOM
     srt_content = srt_content.replace('\u202b', '')  # remove RTL marker if any
@@ -88,6 +91,7 @@ def parse_srt(srt_content):
     return parsed_entries
 
 # Translate SRT segments
+
 def translate_srt(srt_content, target_language):
     entries = parse_srt(srt_content)
     translated = []
@@ -98,6 +102,7 @@ def translate_srt(srt_content, target_language):
     return "\n".join(translated)
 
 # Streamlit app UI
+
 st.set_page_config(page_title="Subtitle Translator App")
 st.title("\U0001F3AC Subtitle Translator")
 st.write("Upload a video *or* subtitle file, choose a language, and get translated subtitles.")
@@ -118,7 +123,7 @@ if input_mode == "Video":
 
                 def process_chunk(chunk_path, offset):
                     result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result.get("segments", [])]
 
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
@@ -155,7 +160,11 @@ elif input_mode == "SRT file":
             srt_content = srt_file.read().decode("utf-8-sig")  # auto-strip BOM
             with st.spinner("Translating SRT file..."):
                 translated_srt = translate_srt(srt_content, target_language)
-                st.success("\u2705 Translation complete!")
-                st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
+                if translated_srt.strip():
+                    st.success("\u2705 Translation complete!")
+                    st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
+                else:
+                    st.warning("The uploaded SRT file contained no translatable content.")
         else:
             st.warning("Please upload an SRT file and select a language.")
+
