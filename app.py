@@ -36,7 +36,7 @@ def translate_line(text, language):
         prompt_lang = language
 
     messages = [
-        {"role": "system", "content": f"Translate this sentence into {prompt_lang}. Return only the translation."},
+        {"role": "system", "content": f"You are a translator. Translate everything the user sends into {prompt_lang}. Respond only with the translation."},
         {"role": "user", "content": text}
     ]
     response = client.chat.completions.create(
@@ -51,6 +51,7 @@ def format_timestamp(seconds):
     return str(datetime.timedelta(seconds=int(seconds))) + ",000"
 
 # Split video into audio chunks for transcription
+# Adjust start to -1 and end to +1 to capture beginning/end better
 def split_video(file_path, chunk_duration=600):
     video = VideoFileClip(file_path)
     duration = int(video.duration)
@@ -60,39 +61,29 @@ def split_video(file_path, chunk_duration=600):
         if end - start <= 0:
             continue
         try:
-            subclip = video.subclip(start, end - 0.1)
+            actual_start = max(0, start - 1)
+            actual_end = min(duration, end + 1)
+            subclip = video.subclip(actual_start, actual_end - 0.1)
             audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             subclip.audio.write_audiofile(audio_temp.name, logger=None)
-            chunks.append((audio_temp.name, start))
+            chunks.append((audio_temp.name, actual_start))
         except Exception as e:
             st.error(f"Error processing chunk {start}-{end}: {e}")
     return chunks
 
-# Parse SRT file content
+# Parse SRT file content (handle multilingual formatting better)
 def parse_srt(srt_content):
-    blocks = re.split(r'\n\s*\n', srt_content.strip())
-    parsed_entries = []
-    for block in blocks:
-        lines = block.strip().split('\n')
-        if len(lines) >= 3:
-            try:
-                num = int(lines[0])
-                times = lines[1]
-                start, end = times.split(' --> ')
-                text = ' '.join(lines[2:])
-                parsed_entries.append((num, start, end, text))
-            except Exception:
-                continue
-    return parsed_entries
+    pattern = re.compile(r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)\n(?=\d+\n|$)', re.DOTALL)
+    matches = pattern.findall(srt_content)
+    return [(int(num), start, end, text.strip()) for num, start, end, text in matches if text.strip()]
 
 # Translate SRT segments
 def translate_srt(srt_content, target_language):
     entries = parse_srt(srt_content)
     translated = []
     for num, start, end, text in entries:
-        if text.strip():
-            translated_text = translate_line(text, target_language)
-            translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
+        translated_text = translate_line(text, target_language)
+        translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
     return "\n".join(translated)
 
 # Streamlit app UI
@@ -116,20 +107,20 @@ if input_mode == "Video":
 
                 def process_chunk(chunk_path, offset):
                     result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result.get("segments", []) if seg["text"].strip()]
 
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
 
-                segments = [seg for group in results for seg in group if seg[2].strip()]
+                segments = [seg for group in results for seg in group]
                 txt_lines = []
                 srt_lines = []
 
                 for i, (start_sec, end_sec, text) in enumerate(segments, 1):
                     start = format_timestamp(start_sec)
                     end = format_timestamp(end_sec)
-                    translation = translate_line(text.strip(), target_language)
-                    txt_lines.append(f"{start} --> {end}\n{text.strip()}\n{translation}\n")
+                    translation = translate_line(text, target_language)
+                    txt_lines.append(f"{start} --> {end}\n{text}\n{translation}\n")
                     srt_lines.append(f"{i}\n{start} --> {end}\n{translation}\n")
 
                 txt_output = "\n".join(txt_lines)
