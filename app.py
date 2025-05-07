@@ -29,33 +29,43 @@ def transcribe_audio(file_path):
     return transcript.model_dump()  # Convert Pydantic object to dictionary
 
 # Function to translate multiple lines using GPT-3.5 in one call
-def batch_translate_lines(lines, language):
+# with batching to avoid context length limits
+def batch_translate_lines(lines, language, chunk_size=30):
     if language == "Egyptian Arabic":
         prompt_lang = "Egyptian Arabic dialect"
     else:
         prompt_lang = language
 
-    numbered_lines = [f"{i+1}. {line}" for i, line in enumerate(lines)]
-    joined = "\n".join(numbered_lines)
+    translated_all = []
 
-    prompt = (
-        f"Translate the following subtitle lines into {prompt_lang}.\n"
-        "Return only the translated lines in the same order and numbering:\n\n"
-        f"{joined}"
-    )
+    for i in range(0, len(lines), chunk_size):
+        chunk = lines[i:i+chunk_size]
+        numbered_lines = [f"{j+1}. {line}" for j, line in enumerate(chunk)]
+        joined = "\n".join(numbered_lines)
 
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a subtitle translator."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
-    )
+        prompt = (
+            f"Translate the following subtitle lines into {prompt_lang}.\n"
+            "Return only the translated lines in the same order and numbering:\n\n"
+            f"{joined}"
+        )
 
-    content = response.choices[0].message.content.strip()
-    translated_lines = re.findall(r"\d+\.\s*(.+)", content)
-    return translated_lines if translated_lines else [content]
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a subtitle translator."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3
+        )
+
+        content = response.choices[0].message.content.strip()
+        translated_lines = re.findall(r"\d+\.\s*(.+)", content)
+        if translated_lines:
+            translated_all.extend(translated_lines)
+        else:
+            translated_all.extend(chunk)  # fallback if parsing fails
+
+    return translated_all
 
 # Format SRT timestamps
 def format_timestamp(seconds):
@@ -172,5 +182,3 @@ elif input_mode == "SRT file":
                 st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
         else:
             st.warning("Please upload an SRT file and select a language.")
-
-
