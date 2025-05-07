@@ -28,30 +28,40 @@ def transcribe_audio(file_path):
         )
     return transcript.model_dump()  # Convert Pydantic object to dictionary
 
-# Function to translate text using GPT-3.5
-def translate_line(text, language):
+# Function to translate multiple lines using GPT-3.5 in one call
+def batch_translate_lines(lines, language):
     if language == "Egyptian Arabic":
         prompt_lang = "Egyptian Arabic dialect"
     else:
         prompt_lang = language
 
-    messages = [
-        {"role": "system", "content": f"Translate this sentence into {prompt_lang}. Return only the translation."},
-        {"role": "user", "content": text}
-    ]
+    numbered_lines = [f"{i+1}. {line}" for i, line in enumerate(lines)]
+    joined = "\n".join(numbered_lines)
+
+    prompt = (
+        f"Translate the following subtitle lines into {prompt_lang}.\n"
+        "Return only the translated lines in the same order and numbering:\n\n"
+        f"{joined}"
+    )
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=messages,
+        messages=[
+            {"role": "system", "content": "You are a subtitle translator."},
+            {"role": "user", "content": prompt}
+        ],
         temperature=0.3
     )
-    return response.choices[0].message.content.strip()
+
+    content = response.choices[0].message.content.strip()
+    translated_lines = re.findall(r"\d+\.\s*(.+)", content)
+    return translated_lines if translated_lines else [content]
 
 # Format SRT timestamps
 def format_timestamp(seconds):
     return str(datetime.timedelta(seconds=int(seconds))) + ",000"
 
 # Split video into audio chunks for transcription
-
 def split_video(file_path, chunk_duration=600):
     video = VideoFileClip(file_path)
     duration = int(video.duration)
@@ -61,20 +71,18 @@ def split_video(file_path, chunk_duration=600):
         if end - start <= 0:
             continue
         try:
-            subclip = video.subclip(start, end)
+            subclip = video.subclip(start, end - 0.1)
             audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             subclip.audio.write_audiofile(audio_temp.name, logger=None)
             chunks.append((audio_temp.name, start))
         except Exception as e:
             st.error(f"Error processing chunk {start}-{end}: {e}")
-    video.close()
     return chunks
 
 # Parse SRT file content
-
 def parse_srt(srt_content):
-    srt_content = srt_content.replace('\ufeff', '')  # remove BOM
-    srt_content = srt_content.replace('\u202b', '')  # remove RTL marker if any
+    srt_content = srt_content.replace('\ufeff', '')
+    srt_content = srt_content.replace('\u202b', '')
     blocks = re.split(r'\n\s*\n', srt_content.strip())
     parsed_entries = []
     for block in blocks:
@@ -91,18 +99,16 @@ def parse_srt(srt_content):
     return parsed_entries
 
 # Translate SRT segments
-
 def translate_srt(srt_content, target_language):
     entries = parse_srt(srt_content)
+    original_lines = [entry[3] for entry in entries]
+    translated_lines = batch_translate_lines(original_lines, target_language)
     translated = []
-    for num, start, end, text in entries:
-        if text.strip():
-            translated_text = translate_line(text, target_language)
-            translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
+    for (num, start, end, _), translated_text in zip(entries, translated_lines):
+        translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
     return "\n".join(translated)
 
 # Streamlit app UI
-
 st.set_page_config(page_title="Subtitle Translator App")
 st.title("\U0001F3AC Subtitle Translator")
 st.write("Upload a video *or* subtitle file, choose a language, and get translated subtitles.")
@@ -123,21 +129,23 @@ if input_mode == "Video":
 
                 def process_chunk(chunk_path, offset):
                     result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result.get("segments", [])]
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
 
                 segments = [seg for group in results for seg in group if seg[2].strip()]
+                original_texts = [text.strip() for (_, _, text) in segments]
+                translated_texts = batch_translate_lines(original_texts, target_language)
+
                 txt_lines = []
                 srt_lines = []
 
-                for i, (start_sec, end_sec, text) in enumerate(segments, 1):
+                for i, ((start_sec, end_sec, original), translated) in enumerate(zip(segments, translated_texts), 1):
                     start = format_timestamp(start_sec)
                     end = format_timestamp(end_sec)
-                    translation = translate_line(text.strip(), target_language)
-                    txt_lines.append(f"{start} --> {end}\n{text.strip()}\n{translation}\n")
-                    srt_lines.append(f"{i}\n{start} --> {end}\n{translation}\n")
+                    txt_lines.append(f"{start} --> {end}\n{original}\n{translated}\n")
+                    srt_lines.append(f"{i}\n{start} --> {end}\n{translated}\n")
 
                 txt_output = "\n".join(txt_lines)
                 srt_output = "\n".join(srt_lines)
@@ -157,14 +165,12 @@ elif input_mode == "SRT file":
     srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
     if st.button("Translate SRT File"):
         if srt_file and target_language:
-            srt_content = srt_file.read().decode("utf-8-sig")  # auto-strip BOM
+            srt_content = srt_file.read().decode("utf-8-sig")
             with st.spinner("Translating SRT file..."):
                 translated_srt = translate_srt(srt_content, target_language)
-                if translated_srt.strip():
-                    st.success("\u2705 Translation complete!")
-                    st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
-                else:
-                    st.warning("The uploaded SRT file contained no translatable content.")
+                st.success("\u2705 Translation complete!")
+                st.download_button("Download Translated .srt", translated_srt, file_name="translated.srt")
         else:
             st.warning("Please upload an SRT file and select a language.")
+
 
