@@ -13,7 +13,10 @@ from openai import OpenAI
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Language options
-LANGUAGES = ["Arabic", "French", "Spanish", "German", "Japanese", "English", "Chinese", "Hindi"]
+LANGUAGES = [
+    "Arabic", "Egyptian Arabic", "French", "Spanish",
+    "German", "Japanese", "English", "Chinese", "Hindi"
+]
 
 # Function to transcribe a chunk
 def transcribe_audio(file_path):
@@ -27,8 +30,13 @@ def transcribe_audio(file_path):
 
 # Function to translate text using GPT-3.5
 def translate_line(text, language):
+    if language == "Egyptian Arabic":
+        prompt_lang = "Egyptian Arabic dialect"
+    else:
+        prompt_lang = language
+
     messages = [
-        {"role": "system", "content": f"Translate this sentence into {language}. Return only the translation."},
+        {"role": "system", "content": f"Translate this sentence into {prompt_lang}. Return only the translation."},
         {"role": "user", "content": text}
     ]
     response = client.chat.completions.create(
@@ -42,7 +50,7 @@ def translate_line(text, language):
 def format_timestamp(seconds):
     return str(datetime.timedelta(seconds=int(seconds))) + ",000"
 
-# Split video into audio chunks for transcription (avoid fps errors)
+# Split video into audio chunks for transcription
 def split_video(file_path, chunk_duration=600):
     video = VideoFileClip(file_path)
     duration = int(video.duration)
@@ -52,7 +60,7 @@ def split_video(file_path, chunk_duration=600):
         if end - start <= 0:
             continue
         try:
-            subclip = video.subclip(start, end)
+            subclip = video.subclip(start, end - 0.1)
             audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             subclip.audio.write_audiofile(audio_temp.name, logger=None)
             chunks.append((audio_temp.name, start))
@@ -62,7 +70,7 @@ def split_video(file_path, chunk_duration=600):
 
 # Parse SRT file content
 def parse_srt(srt_content):
-    blocks = srt_content.strip().split('\n\n')
+    blocks = re.split(r'\n\s*\n', srt_content.strip())
     parsed_entries = []
     for block in blocks:
         lines = block.strip().split('\n')
@@ -82,8 +90,9 @@ def translate_srt(srt_content, target_language):
     entries = parse_srt(srt_content)
     translated = []
     for num, start, end, text in entries:
-        translated_text = translate_line(text, target_language)
-        translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
+        if text.strip():
+            translated_text = translate_line(text, target_language)
+            translated.append(f"{num}\n{start} --> {end}\n{translated_text}\n")
     return "\n".join(translated)
 
 # Streamlit app UI
@@ -92,7 +101,6 @@ st.title("\U0001F3AC Subtitle Translator")
 st.write("Upload a video *or* subtitle file, choose a language, and get translated subtitles.")
 
 input_mode = st.radio("Choose input type:", ["Video", "SRT file"])
-
 target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
 
 if input_mode == "Video":
@@ -108,12 +116,12 @@ if input_mode == "Video":
 
                 def process_chunk(chunk_path, offset):
                     result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result.get("segments", [])]
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
                 with ThreadPoolExecutor() as executor:
                     results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
 
-                segments = [seg for group in results for seg in group]
+                segments = [seg for group in results for seg in group if seg[2].strip()]
                 txt_lines = []
                 srt_lines = []
 
