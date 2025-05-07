@@ -46,10 +46,8 @@ def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars
         joined = "\n".join(numbered_lines)
 
         prompt = (
-            f"Translate the following subtitle lines into {prompt_lang}.
-"
-            f"Each subtitle should be broken into {lines_per_sub} line(s), each line not exceeding {chars_per_line} characters.
-"
+            f"Translate the following subtitle lines into {prompt_lang}.\n"
+            f"Each subtitle should be broken into {lines_per_sub} line(s), each line not exceeding {chars_per_line} characters.\n"
             f"Return only the translated lines in the same order and numbering:\n\n{joined}"
         )
 
