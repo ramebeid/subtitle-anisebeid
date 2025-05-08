@@ -47,7 +47,6 @@ def enforce_line_formatting(text, max_chars_per_line, max_lines):
     return "\n".join(lines)
 
 # Translate multiple lines using GPT
-
 def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars_per_line=42):
     if language == "Egyptian Arabic":
         prompt_lang = "Egyptian Arabic dialect"
@@ -96,9 +95,41 @@ def adjust_timestamps(segments):
         adjusted.append((start, end, text))
     return adjusted
 
+# Normalize video link (Google Drive or Dropbox)
+def get_direct_download_url(url):
+    if "drive.google.com" in url:
+        match = re.search(r"id=([\w-]+)", url)
+        if not match:
+            match = re.search(r"/d/([\w-]+)", url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
+    elif "dropbox.com" in url:
+        return url.replace("?dl=0", "?dl=1") if "?dl=0" in url else url + "?dl=1"
+    return url
+
+# Download file from link
+def download_video_from_url(url):
+    direct_url = get_direct_download_url(url)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(direct_url, headers=headers, stream=True)
+    content_type = response.headers.get("Content-Type", "")
+    if "video" not in content_type:
+        raise ValueError("Invalid video file. Check your link.")
+    temp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    for chunk in response.iter_content(chunk_size=8192):
+        if chunk:
+            temp_video.write(chunk)
+    temp_video.close()
+    return temp_video.name
+
 # Split video
 def split_video(file_path, chunk_duration=600):
-    video = VideoFileClip(file_path)
+    try:
+        video = VideoFileClip(file_path)
+    except Exception as e:
+        raise RuntimeError(f"Could not read video file. Ensure it is a valid MP4/MOV file. Error: {e}")
+
     duration = int(video.duration)
     chunks = []
     for start in range(0, duration, chunk_duration):
@@ -151,9 +182,8 @@ chars_per_line = st.number_input("Maximum characters per line:", min_value=20, m
 output_filename = st.text_input("Name your output file (without extension):", "subtitles")
 
 if input_mode == "Video":
-    st.markdown("**Note:** For Dropbox, use a link ending with `?dl=1`. For Google Drive, format as `https://drive.google.com/uc?export=download&id=FILE_ID`")
     video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
-    video_url = st.text_input("Or paste a video URL (Dropbox or Google Drive):")
+    video_url = st.text_input("Or paste a video URL:")
     if st.button("Generate Subtitles from Video"):
         if (video_file or video_url) and target_language:
             with st.spinner("Processing video and generating subtitles..."):
@@ -162,10 +192,11 @@ if input_mode == "Video":
                         temp_video.write(video_file.read())
                         temp_video_path = temp_video.name
                 else:
-                    response = requests.get(video_url)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-                        temp_video.write(response.content)
-                        temp_video_path = temp_video.name
+                    try:
+                        temp_video_path = download_video_from_url(video_url)
+                    except Exception as e:
+                        st.error(str(e))
+                        st.stop()
 
                 chunks = split_video(temp_video_path)
 
