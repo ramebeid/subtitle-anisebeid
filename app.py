@@ -10,9 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 import requests
 
-# Increase max upload size
-#st.set_option('server.maxUploadSize', 5000)
-
 # Load OpenAI API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -32,7 +29,25 @@ def transcribe_audio(file_path):
         )
     return transcript.model_dump()
 
-# Translate multiple lines using GPT with batching and constraints
+# Enforce subtitle formatting rules
+def enforce_line_formatting(text, max_chars_per_line, max_lines):
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(current_line + " " + word) <= max_chars_per_line:
+            current_line += (" " if current_line else "") + word
+        else:
+            lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    return "\n".join(lines)
+
+# Translate multiple lines using GPT
+
 def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars_per_line=42):
     if language == "Egyptian Arabic":
         prompt_lang = "Egyptian Arabic dialect"
@@ -46,23 +61,21 @@ def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars
         joined = "\n".join(numbered_lines)
 
         prompt = (
-            f"Translate the following subtitle lines into {prompt_lang}.\n"
-            f"Each subtitle should be broken into {lines_per_sub} line(s), each line not exceeding {chars_per_line} characters.\n"
-            f"Return only the translated lines in the same order and numbering:\n\n{joined}"
+            f"Translate the following subtitle lines into {prompt_lang}. Rephrase if necessary to meet a maximum of {chars_per_line} characters per line and {lines_per_sub} lines per subtitle, while keeping the original meaning."
         )
-
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a subtitle translator."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are a subtitle translator and rephraser."},
+                {"role": "user", "content": f"{prompt}\n\n{joined}"}
             ],
             temperature=0.3
         )
 
         content = response.choices[0].message.content.strip()
         translated_lines = re.findall(r"\d+\.\s*(.+)", content)
-        translated_all.extend(translated_lines if translated_lines else chunk)
+        formatted = [enforce_line_formatting(t, chars_per_line, lines_per_sub) for t in translated_lines]
+        translated_all.extend(formatted if formatted else chunk)
 
     return translated_all
 
@@ -138,6 +151,7 @@ chars_per_line = st.number_input("Maximum characters per line:", min_value=20, m
 output_filename = st.text_input("Name your output file (without extension):", "subtitles")
 
 if input_mode == "Video":
+    st.markdown("**Note:** For Dropbox, use a link ending with `?dl=1`. For Google Drive, format as `https://drive.google.com/uc?export=download&id=FILE_ID`")
     video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
     video_url = st.text_input("Or paste a video URL (Dropbox or Google Drive):")
     if st.button("Generate Subtitles from Video"):
