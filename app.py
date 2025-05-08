@@ -11,7 +11,7 @@ from openai import OpenAI
 import requests
 
 # Increase max upload size
-# st.set_option('server.maxUploadSize', 5000)
+st.set_option('server.maxUploadSize', 5000)
 
 # Load OpenAI API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
