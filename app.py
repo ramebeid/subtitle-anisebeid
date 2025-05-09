@@ -31,50 +31,6 @@ def transcribe_audio(file_path):
         )
     return transcript.model_dump()
 
-# Translate batch
-def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars_per_line=42):
-    prompt_lang = "Egyptian Arabic dialect" if language == "Egyptian Arabic" else language
-    translated_all = []
-    for i in range(0, len(lines), chunk_size):
-        chunk = lines[i:i+chunk_size]
-        numbered_lines = [f"{j+1}. {line}" for j, line in enumerate(chunk)]
-        joined = "\n".join(numbered_lines)
-
-        prompt = (
-            f"Translate the following subtitle lines into {prompt_lang}. Rephrase if necessary to meet a maximum of {chars_per_line} characters per line and {lines_per_sub} lines per subtitle, while keeping the original meaning."
-        )
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a subtitle translator and rephraser."},
-                {"role": "user", "content": f"{prompt}\n\n{joined}"}
-            ],
-            temperature=0.3
-        )
-
-        content = response.choices[0].message.content.strip()
-        translated_lines = re.findall(r"\d+\.\s*(.+)", content)
-        formatted = [enforce_line_formatting(t, chars_per_line, lines_per_sub) for t in translated_lines]
-        translated_all.extend(formatted if formatted else chunk)
-    return translated_all
-
-# Format lines
-def enforce_line_formatting(text, max_chars_per_line, max_lines):
-    words = text.split()
-    lines = []
-    current_line = ""
-    for word in words:
-        if len(current_line + " " + word) <= max_chars_per_line:
-            current_line += (" " if current_line else "") + word
-        else:
-            lines.append(current_line)
-            current_line = word
-    if current_line:
-        lines.append(current_line)
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-    return "\n".join(lines)
-
 # Format timestamp
 def format_timestamp(seconds):
     td = datetime.timedelta(seconds=round(seconds))
@@ -114,7 +70,52 @@ def split_video(file_path, chunk_duration=600):
             st.error(f"Error processing chunk {start}-{end}: {e}")
     return chunks
 
+# Enforce line limits on translation
+def enforce_line_formatting(text, max_chars_per_line, max_lines):
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(current_line + " " + word) <= max_chars_per_line:
+            current_line += (" " if current_line else "") + word
+        else:
+            lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    return "\n".join(lines)
+
+# Translate in batch
+def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars_per_line=42):
+    prompt_lang = "Egyptian Arabic dialect" if language == "Egyptian Arabic" else language
+    translated_all = []
+    for i in range(0, len(lines), chunk_size):
+        chunk = lines[i:i+chunk_size]
+        numbered_lines = [f"{j+1}. {line}" for j, line in enumerate(chunk)]
+        joined = "\n".join(numbered_lines)
+
+        prompt = (
+            f"Translate the following subtitle lines into {prompt_lang}. Rephrase if necessary to meet a maximum of {chars_per_line} characters per line and {lines_per_sub} lines per subtitle, while keeping the original meaning."
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a subtitle translator and rephraser."},
+                {"role": "user", "content": f"{prompt}\n\n{joined}"}
+            ],
+            temperature=0.3
+        )
+
+        content = response.choices[0].message.content.strip()
+        translated_lines = re.findall(r"\d+\.\s*(.+)", content)
+        formatted = [enforce_line_formatting(t, chars_per_line, lines_per_sub) for t in translated_lines]
+        translated_all.extend(formatted if formatted else chunk)
+    return translated_all
+
 # Parse SRT
+
 def parse_srt(srt_content):
     srt_content = srt_content.replace('\ufeff', '').replace('\u202b', '')
     blocks = re.split(r'\n\s*\n', srt_content.strip())
@@ -132,6 +133,7 @@ def parse_srt(srt_content):
     return parsed_entries
 
 # Translate SRT
+
 def translate_srt(srt_content, target_language, lines_per_sub=2, chars_per_line=42):
     entries = parse_srt(srt_content)
     original_lines = [entry[3] for entry in entries]
@@ -142,15 +144,17 @@ def translate_srt(srt_content, target_language, lines_per_sub=2, chars_per_line=
 # Streamlit UI
 st.set_page_config(page_title="Subtitle Translator App")
 st.title("\U0001F3AC Subtitle Translator")
-st.write("Upload a video to transcribe subtitles, or an SRT file to translate it.")
+st.write("Upload a video for transcription or a subtitle file for translation.")
 
-input_mode = st.radio("Choose action:", ["Upload Video for Transcription", "Upload SRT File for Translation"])
+input_mode = st.radio("Choose input type:", ["Upload Video for Transcription", "Upload SRT for Translation"])
+target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
+output_filename = st.text_input("Name your output file (without extension):", "subtitles")
 
 if input_mode == "Upload Video for Transcription":
     video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
     if st.button("Transcribe Video"):
         if video_file:
-            with st.spinner("Processing video and generating subtitles..."):
+            with st.spinner("Processing video and generating transcription..."):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
                     temp_video.write(video_file.read())
                     temp_video_path = temp_video.name
@@ -167,27 +171,32 @@ if input_mode == "Upload Video for Transcription":
                 segments = [seg for group in results for seg in group if seg[2].strip()]
                 segments = adjust_timestamps(segments)
 
+                txt_lines = []
                 srt_lines = []
+
                 for i, (start_sec, end_sec, text) in enumerate(segments, 1):
                     start = format_timestamp(start_sec)
                     end = format_timestamp(end_sec)
+                    txt_lines.append(f"{start} --> {end}\n{text.strip()}\n")
                     srt_lines.append(f"{i}\n{start} --> {end}\n{text.strip()}\n")
 
+                txt_output = "\n".join(txt_lines)
                 srt_output = "\n".join(srt_lines)
-                with open("transcription.srt", "w", encoding="utf-8") as f:
+
+                with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
+                    f.write(txt_output)
+                with open(f"{output_filename}.srt", "w", encoding="utf-8") as f:
                     f.write(srt_output)
 
             st.success("\u2705 Transcription complete!")
-            st.download_button("Download .srt", srt_output, file_name="transcription.srt")
+            st.download_button("Download .txt", txt_output, file_name=f"{output_filename}.txt")
+            st.download_button("Download .srt", srt_output, file_name=f"{output_filename}.srt")
         else:
-            st.warning("Please upload a video.")
+            st.warning("Please upload a video file.")
 
-elif input_mode == "Upload SRT File for Translation":
-    target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
+elif input_mode == "Upload SRT for Translation":
     lines_per_sub = st.radio("Number of lines per subtitle:", [1, 2])
     chars_per_line = st.number_input("Maximum characters per line:", min_value=20, max_value=80, value=42)
-    output_filename = st.text_input("Name your output file (without extension):", "subtitles")
-
     srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
     if st.button("Translate SRT File"):
         if srt_file and target_language:
