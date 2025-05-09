@@ -147,7 +147,6 @@ st.title("\U0001F3AC Subtitle Translator")
 st.write("Upload a video for transcription or a subtitle file for translation.")
 
 input_mode = st.radio("Choose input type:", ["Upload Video for Transcription", "Upload SRT for Translation"])
-target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
 output_filename = st.text_input("Name your output file (without extension):", "subtitles")
 
 if input_mode == "Upload Video for Transcription":
@@ -195,6 +194,7 @@ if input_mode == "Upload Video for Transcription":
             st.warning("Please upload a video file.")
 
 elif input_mode == "Upload SRT for Translation":
+    target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
     lines_per_sub = st.radio("Number of lines per subtitle:", [1, 2])
     chars_per_line = st.number_input("Maximum characters per line:", min_value=20, max_value=80, value=42)
     srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
