@@ -31,23 +31,6 @@ def transcribe_audio(file_path):
         )
     return transcript.model_dump()
 
-# Format lines for translation only
-def enforce_line_formatting(text, max_chars_per_line, max_lines):
-    words = text.split()
-    lines = []
-    current_line = ""
-    for word in words:
-        if len(current_line + " " + word) <= max_chars_per_line:
-            current_line += (" " if current_line else "") + word
-        else:
-            lines.append(current_line)
-            current_line = word
-    if current_line:
-        lines.append(current_line)
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-    return "\n".join(lines)
-
 # Translate batch
 def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars_per_line=42):
     prompt_lang = "Egyptian Arabic dialect" if language == "Egyptian Arabic" else language
@@ -74,6 +57,23 @@ def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars
         formatted = [enforce_line_formatting(t, chars_per_line, lines_per_sub) for t in translated_lines]
         translated_all.extend(formatted if formatted else chunk)
     return translated_all
+
+# Format lines
+def enforce_line_formatting(text, max_chars_per_line, max_lines):
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(current_line + " " + word) <= max_chars_per_line:
+            current_line += (" " if current_line else "") + word
+        else:
+            lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    return "\n".join(lines)
 
 # Format timestamp
 def format_timestamp(seconds):
@@ -142,17 +142,13 @@ def translate_srt(srt_content, target_language, lines_per_sub=2, chars_per_line=
 # Streamlit UI
 st.set_page_config(page_title="Subtitle Translator App")
 st.title("\U0001F3AC Subtitle Translator")
-st.write("Upload a video *or* subtitle file, choose options, and get translated subtitles.")
+st.write("Upload a video to transcribe subtitles, or an SRT file to translate it.")
 
-input_mode = st.radio("Choose input type:", ["Video", "SRT file"])
-target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
-lines_per_sub = st.radio("Number of lines per subtitle:", [1, 2])
-chars_per_line = st.number_input("Maximum characters per line:", min_value=20, max_value=80, value=42)
-output_filename = st.text_input("Name your output file (without extension):", "subtitles")
+input_mode = st.radio("Choose action:", ["Upload Video for Transcription", "Upload SRT File for Translation"])
 
-if input_mode == "Video":
+if input_mode == "Upload Video for Transcription":
     video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
-    if st.button("Generate Subtitles from Video"):
+    if st.button("Transcribe Video"):
         if video_file:
             with st.spinner("Processing video and generating subtitles..."):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
@@ -171,30 +167,27 @@ if input_mode == "Video":
                 segments = [seg for group in results for seg in group if seg[2].strip()]
                 segments = adjust_timestamps(segments)
 
-                txt_lines = []
                 srt_lines = []
-
-                for i, (start_sec, end_sec, original) in enumerate(segments, 1):
+                for i, (start_sec, end_sec, text) in enumerate(segments, 1):
                     start = format_timestamp(start_sec)
                     end = format_timestamp(end_sec)
-                    txt_lines.append(f"{start} --> {end}\n{original}\n")
-                    srt_lines.append(f"{i}\n{start} --> {end}\n{original}\n")
+                    srt_lines.append(f"{i}\n{start} --> {end}\n{text.strip()}\n")
 
-                txt_output = "\n".join(txt_lines)
                 srt_output = "\n".join(srt_lines)
-
-                with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
-                    f.write(txt_output)
-                with open(f"{output_filename}.srt", "w", encoding="utf-8") as f:
+                with open("transcription.srt", "w", encoding="utf-8") as f:
                     f.write(srt_output)
 
-            st.success("\u2705 Subtitles generated!")
-            st.download_button("Download .txt", txt_output, file_name=f"{output_filename}.txt")
-            st.download_button("Download .srt", srt_output, file_name=f"{output_filename}.srt")
+            st.success("\u2705 Transcription complete!")
+            st.download_button("Download .srt", srt_output, file_name="transcription.srt")
         else:
             st.warning("Please upload a video.")
 
-elif input_mode == "SRT file":
+elif input_mode == "Upload SRT File for Translation":
+    target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
+    lines_per_sub = st.radio("Number of lines per subtitle:", [1, 2])
+    chars_per_line = st.number_input("Maximum characters per line:", min_value=20, max_value=80, value=42)
+    output_filename = st.text_input("Name your output file (without extension):", "subtitles")
+
     srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
     if st.button("Translate SRT File"):
         if srt_file and target_language:
