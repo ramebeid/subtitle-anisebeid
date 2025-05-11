@@ -173,3 +173,67 @@ def translate_srt(srt_content, target_language, lines_per_sub=2, chars_per_line=
     translated_lines = batch_translate_lines(original_lines, target_language, lines_per_sub=lines_per_sub, chars_per_line=chars_per_line)
     translated = [f"{num}\n{start} --> {end}\n{translated}\n" for (num, start, end, _), translated in zip(entries, translated_lines)]
     return "\n".join(translated)
+
+# === STREAMLIT APP ===
+st.set_page_config(page_title="🎬 Subtitle App")
+st.title("🎬 Subtitle App")
+st.write("Choose an input method below. Upload a video for transcription, or an SRT file for translation.")
+
+input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "📄 SRT for Translation"])
+
+if input_mode == "🎥 Video for Transcription":
+    video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
+    language_from = st.selectbox("Select language spoken in the video:", LANGUAGES)
+    output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
+
+    if st.button("Transcribe Video"):
+        if video_file and language_from:
+            with st.spinner("Processing video and generating transcription..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                    temp_video.write(video_file.read())
+                    temp_video_path = temp_video.name
+
+                chunks = split_video(temp_video_path)
+
+                def process_chunk(chunk_path, offset):
+                    if language_from == "Egyptian Arabic":
+                        result = transcribe_audio_google(chunk_path)
+                    else:
+                        result = transcribe_audio_whisper(chunk_path)
+                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
+
+                with ThreadPoolExecutor() as executor:
+                    results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
+
+                segments = [seg for group in results for seg in group]
+                segments = adjust_timestamps(segments)
+
+                srt_lines = []
+                for i, (start, end, text) in enumerate(segments, 1):
+                    srt_lines.append(f"{i}\n{format_timestamp(start)} --> {format_timestamp(end)}\n{text.strip()}\n")
+
+                srt_output = "\n".join(srt_lines)
+                with open("transcription.srt", "w", encoding="utf-8") as f:
+                    f.write(srt_output)
+
+            st.success("✅ Transcription complete!")
+            st.download_button("Download Transcription SRT", srt_output, file_name=f"{output_name}.srt")
+        else:
+            st.warning("Please upload a video and select language.")
+
+elif input_mode == "📄 SRT for Translation":
+    srt_file = st.file_uploader("Upload an SRT file", type=["srt"])
+    target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
+    lines_per_sub = st.slider("Lines per subtitle", 1, 2, value=2)
+    chars_per_line = st.slider("Max characters per line", 20, 60, value=42)
+    output_name = st.text_input("Enter desired name for translated file:", value="translated")
+
+    if st.button("Translate SRT"):
+        if srt_file and target_language:
+            srt_content = srt_file.read().decode("utf-8")
+            with st.spinner("Translating SRT file..."):
+                translated_srt = translate_srt(srt_content, target_language, lines_per_sub=lines_per_sub, chars_per_line=chars_per_line)
+                st.success("✅ Translation complete!")
+                st.download_button("Download Translated SRT", translated_srt, file_name=f"{output_name}.srt")
+        else:
+            st.warning("Please upload an SRT file and choose a target language.")
