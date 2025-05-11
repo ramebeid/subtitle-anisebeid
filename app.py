@@ -1,4 +1,4 @@
-# Subtitle Translator App - Streamlit + OpenAI
+# Subtitle Translator App - Streamlit + OpenAI + Google STT + NLLB
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -11,6 +11,8 @@ from moviepy.editor import VideoFileClip, AudioFileClip
 from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 import requests
+import json
+import base64
 
 # Load OpenAI API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -22,7 +24,8 @@ LANGUAGES = [
 ]
 
 # Transcribe a chunk
-def transcribe_audio(file_path):
+
+def transcribe_audio_whisper(file_path):
     with open(file_path, "rb") as audio_file:
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
@@ -30,6 +33,30 @@ def transcribe_audio(file_path):
             response_format="verbose_json"
         )
     return transcript.model_dump()
+
+def transcribe_audio_google(file_path):
+    from google.cloud import speech_v1p1beta1 as speech
+    client = speech.SpeechClient()
+    with open(file_path, "rb") as f:
+        audio = speech.RecognitionAudio(content=f.read())
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=44100,
+        language_code="ar-EG",
+        enable_word_time_offsets=True
+    )
+    response = client.recognize(config=config, audio=audio)
+    results = []
+    for result in response.results:
+        for alt in result.alternatives:
+            words = alt.words
+            for word in words:
+                results.append({
+                    "start": word.start_time.total_seconds(),
+                    "end": word.end_time.total_seconds(),
+                    "text": word.word
+                })
+    return {"segments": results}
 
 # Format timestamp
 def format_timestamp(seconds):
@@ -99,19 +126,25 @@ def batch_translate_lines(lines, language, chunk_size=30, lines_per_sub=2, chars
         prompt = (
             f"Translate the following subtitle lines into {prompt_lang}. Rephrase if necessary to meet a maximum of {chars_per_line} characters per line and {lines_per_sub} lines per subtitle, while keeping the original meaning."
         )
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a subtitle translator and rephraser."},
-                {"role": "user", "content": f"{prompt}\n\n{joined}"}
-            ],
-            temperature=0.3
-        )
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a subtitle translator and rephraser."},
+                    {"role": "user", "content": f"{prompt}\n\n{joined}"}
+                ],
+                temperature=0.3
+            )
+            content = response.choices[0].message.content.strip()
+            translated_lines = re.findall(r"\d+\.\s*(.+)", content)
+        except:
+            translated_lines = ["?"] * len(chunk)
 
-        content = response.choices[0].message.content.strip()
-        translated_lines = re.findall(r"\d+\.\s*(.+)", content)
+        if len(translated_lines) < len(chunk):
+            translated_lines += ["?"] * (len(chunk) - len(translated_lines))
+
         formatted = [enforce_line_formatting(t, chars_per_line, lines_per_sub) for t in translated_lines]
-        translated_all.extend(formatted if formatted else chunk)
+        translated_all.extend(formatted)
     return translated_all
 
 # Parse SRT
@@ -140,70 +173,3 @@ def translate_srt(srt_content, target_language, lines_per_sub=2, chars_per_line=
     translated_lines = batch_translate_lines(original_lines, target_language, lines_per_sub=lines_per_sub, chars_per_line=chars_per_line)
     translated = [f"{num}\n{start} --> {end}\n{translated}\n" for (num, start, end, _), translated in zip(entries, translated_lines)]
     return "\n".join(translated)
-
-# Streamlit UI
-st.set_page_config(page_title="Subtitle Translator App")
-st.title("\U0001F3AC Subtitle Translator")
-st.write("Upload a video for transcription or a subtitle file for translation.")
-
-input_mode = st.radio("Choose input type:", ["Upload Video for Transcription", "Upload SRT for Translation"])
-output_filename = st.text_input("Name your output file (without extension):", "subtitles")
-
-if input_mode == "Upload Video for Transcription":
-    video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mpeg4"], key="video")
-    if st.button("Transcribe Video"):
-        if video_file:
-            with st.spinner("Processing video and generating transcription..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-                    temp_video.write(video_file.read())
-                    temp_video_path = temp_video.name
-
-                chunks = split_video(temp_video_path)
-
-                def process_chunk(chunk_path, offset):
-                    result = transcribe_audio(chunk_path)
-                    return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
-
-                with ThreadPoolExecutor() as executor:
-                    results = list(executor.map(lambda c: process_chunk(c[0], c[1]), chunks))
-
-                segments = [seg for group in results for seg in group if seg[2].strip()]
-                segments = adjust_timestamps(segments)
-
-                txt_lines = []
-                srt_lines = []
-
-                for i, (start_sec, end_sec, text) in enumerate(segments, 1):
-                    start = format_timestamp(start_sec)
-                    end = format_timestamp(end_sec)
-                    txt_lines.append(f"{start} --> {end}\n{text.strip()}\n")
-                    srt_lines.append(f"{i}\n{start} --> {end}\n{text.strip()}\n")
-
-                txt_output = "\n".join(txt_lines)
-                srt_output = "\n".join(srt_lines)
-
-                with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
-                    f.write(txt_output)
-                with open(f"{output_filename}.srt", "w", encoding="utf-8") as f:
-                    f.write(srt_output)
-
-            st.success("\u2705 Transcription complete!")
-            st.download_button("Download .txt", txt_output, file_name=f"{output_filename}.txt")
-            st.download_button("Download .srt", srt_output, file_name=f"{output_filename}.srt")
-        else:
-            st.warning("Please upload a video file.")
-
-elif input_mode == "Upload SRT for Translation":
-    target_language = st.selectbox("Translate subtitles into:", LANGUAGES)
-    lines_per_sub = st.radio("Number of lines per subtitle:", [1, 2])
-    chars_per_line = st.number_input("Maximum characters per line:", min_value=20, max_value=80, value=42)
-    srt_file = st.file_uploader("Upload an SRT file", type=["srt"], key="srt")
-    if st.button("Translate SRT File"):
-        if srt_file and target_language:
-            srt_content = srt_file.read().decode("utf-8-sig")
-            with st.spinner("Translating SRT file..."):
-                translated_srt = translate_srt(srt_content, target_language, lines_per_sub=lines_per_sub, chars_per_line=chars_per_line)
-                st.success("\u2705 Translation complete!")
-                st.download_button("Download Translated .srt", translated_srt, file_name=f"{output_filename}.srt")
-        else:
-            st.warning("Please upload an SRT file and select a language.")
