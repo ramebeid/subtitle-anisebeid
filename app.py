@@ -34,30 +34,6 @@ def transcribe_audio_whisper(file_path):
         )
     return transcript.model_dump()
 
-def transcribe_audio_google(file_path):
-    from google.cloud import speech_v1p1beta1 as speech
-    client = speech.SpeechClient()
-    with open(file_path, "rb") as f:
-        audio = speech.RecognitionAudio(content=f.read())
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=44100,
-        language_code="ar-EG",
-        enable_word_time_offsets=True
-    )
-    response = client.recognize(config=config, audio=audio)
-    results = []
-    for result in response.results:
-        for alt in result.alternatives:
-            words = alt.words
-            for word in words:
-                results.append({
-                    "start": word.start_time.total_seconds(),
-                    "end": word.end_time.total_seconds(),
-                    "text": word.word
-                })
-    return {"segments": results}
-
 # Format timestamp
 def format_timestamp(seconds):
     td = datetime.timedelta(seconds=round(seconds))
