@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 import streamlit as st
+LANGUAGES = [
+    "Arabic", "Egyptian Arabic", "French", "Spanish",
+    "German", "Japanese", "English", "Chinese", "Hindi"
+]
+
 import tempfile
 import datetime
 import re
@@ -156,7 +161,7 @@ input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "�
 
 if input_mode == "🎥 Video for Transcription":
     video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
-    language_from = st.selectbox("Select language spoken in the video:", LANGUAGES)
+    language_from = st.st.empty()
     output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
 
     if st.button("Transcribe Video"):
