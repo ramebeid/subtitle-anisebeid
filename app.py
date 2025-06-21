@@ -31,7 +31,7 @@ def transcribe_audio_whisper(file_path):
             model="whisper-1",
             file=audio_file,
             response_format="verbose_json"
-        )
+        )  # auto-detects spoken language
     return transcript.model_dump()
 
 # Format timestamp
