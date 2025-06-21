@@ -160,7 +160,8 @@ st.write("Choose an input method below. Upload a video for transcription, or an 
 input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "📄 SRT for Translation"])
 
 if input_mode == "🎥 Video for Transcription":
-    video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
+    video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
+    output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
 
     if st.button("Transcribe Video"):
         if video_file:
