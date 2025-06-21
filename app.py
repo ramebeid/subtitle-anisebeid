@@ -161,7 +161,7 @@ input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "�
 
 if input_mode == "🎥 Video for Transcription":
     video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
-    language_from = st.st.empty()
+  #  language_from = st.empty()
     output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
 
     if st.button("Transcribe Video"):
