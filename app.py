@@ -18,10 +18,7 @@ import base64
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Language options
-LANGUAGES = [
-    "Arabic", "Egyptian Arabic", "French", "Spanish",
-    "German", "Japanese", "English", "Chinese", "Hindi"
-]
+
 
 # Transcribe a chunk
 
