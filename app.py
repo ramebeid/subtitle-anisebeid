@@ -173,10 +173,7 @@ if input_mode == "🎥 Video for Transcription":
                 chunks = split_video(temp_video_path)
 
                 def process_chunk(chunk_path, offset):
-                    if language_from == "Egyptian Arabic":
-                        result = transcribe_audio_google(chunk_path)
-                    else:
-                        result = transcribe_audio_whisper(chunk_path)
+                    result = transcribe_audio_whisper(chunk_path)
                     return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
                 with ThreadPoolExecutor() as executor:
