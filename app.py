@@ -219,3 +219,48 @@ elif input_mode == "📄 SRT for Translation":
                 st.download_button("Download Translated SRT", translated_srt, file_name=f"{output_name}.srt")
         else:
             st.warning("Please upload an SRT file and choose a target language.")
+
+
+
+def transcribe_audio_google(audio_path):
+    from google.cloud import speech
+    import json
+    import streamlit as st
+    import os
+    import tempfile
+
+    # Write credentials to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as temp_json:
+        json.dump(dict(st.secrets["GOOGLE_CREDENTIALS"]), temp_json)
+        temp_json_path = temp_json.name
+
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_json_path
+
+    client = speech.SpeechClient()
+
+    with open(audio_path, "rb") as f:
+        content = f.read()
+
+    audio = speech.RecognitionAudio(content=content)
+
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
+        sample_rate_hertz=44100,
+        audio_channel_count=1,
+        enable_automatic_punctuation=True,
+        enable_word_time_offsets=True,
+        language_code="en-US",
+        alternative_language_codes=["fr-FR", "ar-EG", "de-DE", "es-ES", "hi-IN", "zh"],
+        model="latest_long"
+    )
+
+    response = client.recognize(config=config, audio=audio)
+
+    segments = []
+    for result in response.results:
+        alt = result.alternatives[0]
+        start = alt.words[0].start_time.total_seconds() if alt.words else 0
+        end = alt.words[-1].end_time.total_seconds() if alt.words else start + 2
+        segments.append({"start": start, "end": end, "text": alt.transcript})
+
+    return segments
