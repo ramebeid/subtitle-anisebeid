@@ -22,28 +22,6 @@ import base64
 # Load OpenAI API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-
-def refine_with_gpt(text_block):
-    system_prompt = (
-        "You are a multilingual transcription assistant. "
-        "The user will give you a rough transcript of a sentence that may include Arabic and English mixed together. "
-        "Your job is to fix the transcription, keep words in their original spoken language, and return clean readable text."
-    )
-    user_prompt = f"Clean this transcript, preserving all original language switches:\n\n{text_block}"
-
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.4
-    )
-    return response.choices[0].message.content.strip()
-
-
-
-
 # Language options
 
 
@@ -76,7 +54,7 @@ def adjust_timestamps(segments):
     return adjusted
 
 # Split video
-def split_video(file_path, chunk_duration=600):
+def split_video(file_path, chunk_duration=1):
     try:
         video = VideoFileClip(file_path)
     except Exception as e:
