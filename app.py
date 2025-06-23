@@ -29,7 +29,7 @@ def transcribe_with_google(audio_path):
     import tempfile
     # Save JSON from secrets to a temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-        tmp.write(json.dumps(st.secrets["GOOGLE_CREDENTIALS"]).encode())
+        tmp.write(json.dumps(dict(st.secrets["GOOGLE_CREDENTIALS"])).encode())
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
 
     client = speech.SpeechClient()
