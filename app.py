@@ -22,45 +22,6 @@ import base64
 # Load OpenAI API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-
-def transcribe_with_google(audio_path):
-    from google.cloud import speech_v1p1beta1 as speech
-    import json
-    import tempfile
-    # Save JSON from secrets to a temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-        tmp.write(json.dumps(dict(st.secrets["GOOGLE_CREDENTIALS"])).encode())
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
-
-    client = speech.SpeechClient()
-    with open(audio_path, "rb") as audio_file:
-        content = audio_file.read()
-
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=44100,
-        language_code="en-US",
-        alternative_language_codes=["ar-EG"],
-        enable_word_time_offsets=True
-    )
-
-    response = client.recognize(config=config, audio=audio)
-
-    results = []
-    for result in response.results:
-        for alt in result.alternatives:
-            for word in alt.words:
-                results.append({
-                    "start": word.start_time.total_seconds(),
-                    "end": word.end_time.total_seconds(),
-                    "text": word.word
-                })
-    return {"segments": results}
-
-
-
-
 # Language options
 
 
@@ -199,10 +160,6 @@ st.write("Choose an input method below. Upload a video for transcription, or an 
 input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "📄 SRT for Translation"])
 
 if input_mode == "🎥 Video for Transcription":
-
-    st.markdown("### Choose transcription type")
-    transcription_mode = st.radio("Select video type:", ["Single-language (Whisper)", "Multilingual (Google STT)"])
-
     video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
     output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
 
@@ -216,7 +173,7 @@ if input_mode == "🎥 Video for Transcription":
                 chunks = split_video(temp_video_path)
 
                 def process_chunk(chunk_path, offset):
-                    result = transcribe_audio_whisper(chunk_path) if transcription_mode == "Single-language (Whisper)" else transcribe_with_google(chunk_path)
+                    result = transcribe_audio_whisper(chunk_path)
                     return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
                 with ThreadPoolExecutor() as executor:
