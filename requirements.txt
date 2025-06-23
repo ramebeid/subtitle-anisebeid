@@ -4,3 +4,4 @@ setuptools
 imageio-ffmpeg==0.4.7
 moviepy==1.0.3
 python-dotenv
+google-cloud-speech
