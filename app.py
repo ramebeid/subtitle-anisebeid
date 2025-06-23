@@ -161,6 +161,14 @@ input_mode = st.radio("Select input type:", ["🎥 Video for Transcription", "�
 
 if input_mode == "🎥 Video for Transcription":
     video_file = st.file_uploader("Upload your video file (MP4, MOV, MPEG4)", type=["mp4", "mov", "mpeg4"])
+
+    st.subheader("Choose Transcription Type")
+    transcription_type = st.radio(
+        "Is the video spoken in a single language or multiple languages?",
+        ["Single Language", "Multilingual"],
+        horizontal=True
+    )
+
     output_name = st.text_input("Enter desired name for output subtitle file:", value="transcription")
 
     if st.button("Transcribe Video"):
@@ -173,7 +181,7 @@ if input_mode == "🎥 Video for Transcription":
                 chunks = split_video(temp_video_path)
 
                 def process_chunk(chunk_path, offset):
-                    result = transcribe_audio_whisper(chunk_path)
+                    result = transcribe_audio_whisper(chunk_path) if transcription_type == "Single Language" else transcribe_audio_google(chunk_path)
                     return [(seg["start"] + offset, seg["end"] + offset, seg["text"]) for seg in result["segments"]]
 
                 with ThreadPoolExecutor() as executor:
